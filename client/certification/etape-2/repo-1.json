@@ -1,0 +1,48 @@
+{
+  "command": "repo",
+  "ok": true,
+  "dryRun": false,
+  "shop": "canari-certif",
+  "repository": {
+    "owner": "DamienGR",
+    "repo": "shop-canari-certif",
+    "nameWithOwner": "DamienGR/shop-canari-certif",
+    "url": "git@github.com:DamienGR/shop-canari-certif.git",
+    "created": true,
+    "derived": false,
+    "visibility": "public"
+  },
+  "branch": {
+    "name": "main",
+    "pushed": true
+  },
+  "environments": [
+    {
+      "env": "staging",
+      "action": "create",
+      "protected": false,
+      "refusal": null
+    },
+    {
+      "env": "production",
+      "action": "create",
+      "protected": true,
+      "refusal": null
+    }
+  ],
+  "secrets": [
+    {
+      "env": "staging",
+      "set": [
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "SHOPCTL_BACKUP_KEY"
+      ],
+      "from": "CLOUDFLARE_API_TOKEN_STAGING",
+      "replaced": []
+    }
+  ],
+  "missingTokens": [
+    "production"
+  ]
+}
