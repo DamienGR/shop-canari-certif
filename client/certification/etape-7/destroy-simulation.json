@@ -1,0 +1,19 @@
+{
+  "command": "destroy",
+  "ok": true,
+  "dryRun": true,
+  "shop": "canari-certif",
+  "env": "staging",
+  "account": {
+    "id": "e11ea775b0317980f1f70960d1000d09",
+    "name": "<email>'s Account"
+  },
+  "wouldRemove": [
+    "minshop-canari-certif-staging",
+    "minshop-canari-certif-staging-session",
+    "minshop-canari-certif-staging-images",
+    "minshop-canari-certif-staging-files",
+    "minshop-canari-certif-staging-backups",
+    "minshop-canari-certif-staging-db"
+  ]
+}

@@ -1,0 +1,81 @@
+[
+  {
+    "name": "ASSETS",
+    "type": "assets"
+  },
+  {
+    "name": "AUTH_RATE_LIMITER",
+    "namespace_id": "10001",
+    "simple": {
+      "limit": 10,
+      "period": 60
+    },
+    "type": "ratelimit"
+  },
+  {
+    "bucket_name": "minshop-canari-certif-staging-images",
+    "jurisdiction": "eu",
+    "name": "BUCKET",
+    "type": "r2_bucket"
+  },
+  {
+    "name": "CF_ACCESS_AUD",
+    "text": "",
+    "type": "plain_text"
+  },
+  {
+    "name": "CF_ACCESS_TEAM_DOMAIN",
+    "text": "",
+    "type": "plain_text"
+  },
+  {
+    "name": "CHECKOUT_RATE_LIMITER",
+    "namespace_id": "10002",
+    "simple": {
+      "limit": 20,
+      "period": 60
+    },
+    "type": "ratelimit"
+  },
+  {
+    "database_id": "22a5eef5-d4b3-480e-8b86-6e00f6bc8558",
+    "id": "22a5eef5-d4b3-480e-8b86-6e00f6bc8558",
+    "name": "DB",
+    "type": "d1"
+  },
+  {
+    "bucket_name": "minshop-canari-certif-staging-files",
+    "jurisdiction": "eu",
+    "name": "FILES",
+    "type": "r2_bucket"
+  },
+  {
+    "name": "IMAGE_BASE_URL",
+    "text": "",
+    "type": "plain_text"
+  },
+  {
+    "name": "SEARCH_RATE_LIMITER",
+    "namespace_id": "10003",
+    "simple": {
+      "limit": 60,
+      "period": 60
+    },
+    "type": "ratelimit"
+  },
+  {
+    "name": "SESSION",
+    "namespace_id": "b1de8920f62f480fb770c33dd90d8245",
+    "type": "kv_namespace"
+  },
+  {
+    "name": "STORE_NAME",
+    "text": "Ma boutique",
+    "type": "plain_text"
+  },
+  {
+    "name": "TIME_ZONE",
+    "text": "Europe/Paris",
+    "type": "plain_text"
+  }
+]

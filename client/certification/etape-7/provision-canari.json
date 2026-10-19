@@ -1,0 +1,108 @@
+{
+  "command": "provision",
+  "ok": true,
+  "dryRun": false,
+  "shop": "canari-certif",
+  "env": "staging",
+  "account": {
+    "id": "e11ea775b0317980f1f70960d1000d09",
+    "name": "<email>'s Account"
+  },
+  "jurisdiction": "eu",
+  "resources": {
+    "worker": "minshop-canari-certif-staging",
+    "database": "minshop-canari-certif-staging-db",
+    "images": "minshop-canari-certif-staging-images",
+    "files": "minshop-canari-certif-staging-files",
+    "backups": "minshop-canari-certif-staging-backups",
+    "sessions": "minshop-canari-certif-staging-session"
+  },
+  "databaseId": "22a5eef5-d4b3-480e-8b86-6e00f6bc8558",
+  "steps": [
+    {
+      "resource": "base D1",
+      "name": "minshop-canari-certif-staging-db",
+      "action": "create",
+      "detail": "juridiction eu, 22a5eef5-d4b3-480e-8b86-6e00f6bc8558"
+    },
+    {
+      "resource": "bucket images",
+      "name": "minshop-canari-certif-staging-images",
+      "action": "create",
+      "detail": "juridiction eu"
+    },
+    {
+      "resource": "bucket fichiers",
+      "name": "minshop-canari-certif-staging-files",
+      "action": "create",
+      "detail": "juridiction eu"
+    },
+    {
+      "resource": "bucket sauvegardes",
+      "name": "minshop-canari-certif-staging-backups",
+      "action": "create",
+      "detail": "juridiction eu"
+    }
+  ],
+  "jurisdictionChecks": [
+    {
+      "resource": "minshop-canari-certif-staging-db",
+      "expected": "eu",
+      "reported": "eu",
+      "ok": true
+    },
+    {
+      "resource": "minshop-canari-certif-staging-images",
+      "expected": "eu",
+      "reported": "eu",
+      "ok": true
+    },
+    {
+      "resource": "minshop-canari-certif-staging-files",
+      "expected": "eu",
+      "reported": "eu",
+      "ok": true
+    },
+    {
+      "resource": "minshop-canari-certif-staging-backups",
+      "expected": "eu",
+      "reported": "eu",
+      "ok": true
+    }
+  ],
+  "exposure": {
+    "files": {
+      "devUrl": null,
+      "domains": [],
+      "public": false,
+      "known": true
+    },
+    "images": {
+      "devUrl": null,
+      "domains": [],
+      "public": false,
+      "known": true
+    },
+    "backups": {
+      "devUrl": null,
+      "domains": [],
+      "public": false,
+      "known": true
+    }
+  },
+  "retention": {
+    "days": 90,
+    "action": "create"
+  },
+  "config": "wrangler.jsonc",
+  "migrations": "applied",
+  "secrets": {
+    "present": [],
+    "created": [],
+    "pending": [
+      "AUTH_SECRET",
+      "SECRETS_KEK"
+    ]
+  },
+  "workerDeployed": false
+}

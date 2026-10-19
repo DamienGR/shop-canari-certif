@@ -1,0 +1,3 @@
+minshop-pilote-certif-staging-backups
+minshop-pilote-certif-staging-files
+minshop-pilote-certif-staging-images

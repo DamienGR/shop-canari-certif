@@ -1,0 +1,2 @@
+minshop-canari-certif-staging-session b1de8920f62f480fb770c33dd90d8245
+minshop-pilote-certif-staging-session 68bb5c507c9c4d1fa8321742439bdd30

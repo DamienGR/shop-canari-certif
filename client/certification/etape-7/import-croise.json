@@ -1,0 +1,10 @@
+{
+  "ok": false,
+  "error": {
+    "kind": "precondition",
+    "code": 4,
+    "message": "wrangler.jsonc ne nomme pas « minshop-pilote-certif-staging-images » : il décrit une autre boutique que ce manifeste.",
+    "hint": "Rendez-le pour cette boutique ET cet environnement — `node scripts/prepare-client.mjs <slug> [--env <staging|production>]` — avant d'importer. Sans ce contrôle, l'import écrirait dans la base d'une autre boutique, ou dans celle d'un autre environnement : la liaison D1 s'appelle « DB » partout.",
+    "details": null
+  }
+}
