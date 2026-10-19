@@ -1,0 +1,6 @@
+minshop-canari-certif-staging-backups
+minshop-canari-certif-staging-files
+minshop-canari-certif-staging-images
+minshop-pilote-certif-staging-backups
+minshop-pilote-certif-staging-files
+minshop-pilote-certif-staging-images

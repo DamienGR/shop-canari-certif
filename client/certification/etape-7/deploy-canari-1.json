@@ -1,0 +1,83 @@
+{
+  "command": "deploy",
+  "ok": true,
+  "dryRun": false,
+  "shop": "canari-certif",
+  "env": "staging",
+  "account": {
+    "id": "e11ea775b0317980f1f70960d1000d09",
+    "name": "<email>'s Account"
+  },
+  "resources": {
+    "worker": "minshop-canari-certif-staging",
+    "database": "minshop-canari-certif-staging-db",
+    "images": "minshop-canari-certif-staging-images",
+    "files": "minshop-canari-certif-staging-files",
+    "backups": "minshop-canari-certif-staging-backups",
+    "sessions": "minshop-canari-certif-staging-session"
+  },
+  "databaseId": "22a5eef5-d4b3-480e-8b86-6e00f6bc8558",
+  "backup": null,
+  "bookmark": null,
+  "origin": "https://minshop-canari-certif-staging.<sous-domaine>.workers.dev",
+  "secrets": {
+    "present": [
+      "AUTH_SECRET",
+      "SECRETS_KEK"
+    ],
+    "created": []
+  },
+  "smoke": {
+    "origin": "https://minshop-canari-certif-staging.<sous-domaine>.workers.dev",
+    "gated": false,
+    "ok": true,
+    "results": [
+      {
+        "id": "storefront",
+        "path": "/",
+        "what": "la vitrine répond et se déclare française",
+        "severity": "warn",
+        "ok": false,
+        "status": 302,
+        "message": "renvoie vers /admin/setup : la boutique n'est pas encore installée (la base a répondu, l'installation y est inachevée). Ce point se vérifiera au déploiement qui suivra l'assistant."
+      },
+      {
+        "id": "catalogue",
+        "path": "/products",
+        "what": "le catalogue rend, donc la base D1 répond",
+        "severity": "warn",
+        "ok": false,
+        "status": 302,
+        "message": "renvoie vers /admin/setup : la boutique n'est pas encore installée (la base a répondu, l'installation y est inachevée). Ce point se vérifiera au déploiement qui suivra l'assistant."
+      },
+      {
+        "id": "robots",
+        "path": "/robots.txt",
+        "what": "les fichiers de service sont servis",
+        "severity": "warn",
+        "ok": false,
+        "status": 302,
+        "message": "renvoie vers /admin/setup : la boutique n'est pas encore installée (la base a répondu, l'installation y est inachevée). Ce point se vérifiera au déploiement qui suivra l'assistant."
+      },
+      {
+        "id": "admin-closed",
+        "path": "/admin",
+        "what": "l'administration n'est pas ouverte",
+        "severity": "fail",
+        "ok": true,
+        "status": 303,
+        "message": null
+      },
+      {
+        "id": "admin-setup-open",
+        "path": "/admin/setup",
+        "what": "l'assistant de première installation est refermé",
+        "severity": "warn",
+        "ok": false,
+        "status": 200,
+        "message": "répond 200 : n'importe qui peut définir le mot de passe de l'administration. Ouvrez /admin/setup maintenant, ou placez Cloudflare Access devant /admin."
+      }
+    ]
+  },
+  "rollbackTo": "1ecc35d9-3735-4d6c-949a-0f73fd82b815"
+}

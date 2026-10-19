@@ -1,0 +1,3 @@
+canari  000
+pilote  200  produits 21
+canari relue en IPv4  404  error code: 1042

@@ -1,0 +1,81 @@
+[
+  {
+    "name": "ASSETS",
+    "type": "assets"
+  },
+  {
+    "name": "AUTH_RATE_LIMITER",
+    "namespace_id": "10001",
+    "simple": {
+      "limit": 10,
+      "period": 60
+    },
+    "type": "ratelimit"
+  },
+  {
+    "bucket_name": "minshop-pilote-certif-staging-images",
+    "jurisdiction": "eu",
+    "name": "BUCKET",
+    "type": "r2_bucket"
+  },
+  {
+    "name": "CF_ACCESS_AUD",
+    "text": "ee6bb982a33ed0e3e603b1dfa4bfcd5aa3f69df92883fb1d37d3823e775ca9db",
+    "type": "plain_text"
+  },
+  {
+    "name": "CF_ACCESS_TEAM_DOMAIN",
+    "text": "https://minshop-cert-a.cloudflareaccess.com",
+    "type": "plain_text"
+  },
+  {
+    "name": "CHECKOUT_RATE_LIMITER",
+    "namespace_id": "10002",
+    "simple": {
+      "limit": 20,
+      "period": 60
+    },
+    "type": "ratelimit"
+  },
+  {
+    "database_id": "42136d04-8561-487d-bf2d-044ce11ea2ea",
+    "id": "42136d04-8561-487d-bf2d-044ce11ea2ea",
+    "name": "DB",
+    "type": "d1"
+  },
+  {
+    "bucket_name": "minshop-pilote-certif-staging-files",
+    "jurisdiction": "eu",
+    "name": "FILES",
+    "type": "r2_bucket"
+  },
+  {
+    "name": "IMAGE_BASE_URL",
+    "text": "",
+    "type": "plain_text"
+  },
+  {
+    "name": "SEARCH_RATE_LIMITER",
+    "namespace_id": "10003",
+    "simple": {
+      "limit": 60,
+      "period": 60
+    },
+    "type": "ratelimit"
+  },
+  {
+    "name": "SESSION",
+    "namespace_id": "68bb5c507c9c4d1fa8321742439bdd30",
+    "type": "kv_namespace"
+  },
+  {
+    "name": "STORE_NAME",
+    "text": "Ma boutique",
+    "type": "plain_text"
+  },
+  {
+    "name": "TIME_ZONE",
+    "text": "Europe/Paris",
+    "type": "plain_text"
+  }
+]

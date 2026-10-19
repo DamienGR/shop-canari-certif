@@ -1,0 +1,6 @@
+canari /api/products/croix-test-canari  200
+pilote /api/products/croix-test-canari  404
+canari /api/products/croix-test-pilote  404
+pilote /api/products/croix-test-pilote  200
+canari produits  1
+pilote produits  21

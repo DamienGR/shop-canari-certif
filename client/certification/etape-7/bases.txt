@@ -1,0 +1,2 @@
+minshop-canari-certif-staging-db 22a5eef5-d4b3-480e-8b86-6e00f6bc8558
+minshop-pilote-certif-staging-db 42136d04-8561-487d-bf2d-044ce11ea2ea
