@@ -70,9 +70,9 @@ describe('parseParcelForm', () => {
     expect(result.parcel).toEqual({ length: 12, width: 9, height: 3, weightGrams: 907 });
   });
   it('refuses missing or non-positive fields with a message', () => {
-    expect(parseParcelForm({ length: '', width: '9', height: '3', weight: '2' }, 'g').error).toMatch(/length/);
-    expect(parseParcelForm({ length: '12', width: '9', height: '3', weight: '0' }, 'g').error).toMatch(/weight/);
-    expect(parseParcelForm({ length: '12', width: '9', height: '3', weight: 'heavy' }, 'g').error).toMatch(/weight/);
+    expect(parseParcelForm({ length: '', width: '9', height: '3', weight: '2' }, 'g').error).toMatch(/longueur/);
+    expect(parseParcelForm({ length: '12', width: '9', height: '3', weight: '0' }, 'g').error).toMatch(/poids/);
+    expect(parseParcelForm({ length: '12', width: '9', height: '3', weight: 'heavy' }, 'g').error).toMatch(/poids/);
   });
   it('bounds a single dimension at ten metres', () => {
     expect(parseDimension('1000')).toBe(1000);
@@ -113,6 +113,11 @@ describe('carrierCodeFor', () => {
     expect(carrierCodeFor('UPS')).toBe('ups');
     expect(carrierCodeFor('FedEx')).toBe('fedex');
     expect(carrierCodeFor('DHL Express')).toBe('dhl');
+    expect(carrierCodeFor('Colissimo')).toBe('colissimo');
+    expect(carrierCodeFor('Chronopost')).toBe('chronopost');
+    expect(carrierCodeFor('Mondial Relay')).toBe('mondialrelay');
+    expect(carrierCodeFor('DPD France')).toBe('dpd');
+    expect(carrierCodeFor('GLS')).toBe('gls');
     expect(carrierCodeFor('Canada Post')).toBe('other');
   });
 });

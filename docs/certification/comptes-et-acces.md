@@ -120,6 +120,7 @@ Workers », puis :
 | Workers Scripts, écriture | `deploy`, `versions list`, `secret list` et `secret put` |
 | D1, écriture | création et lecture des bases, migrations, `d1 execute` (sauvegarde, import), signet Time Travel |
 | Workers R2 Storage, écriture | buckets dans leur juridiction, règle de cycle de vie, objets des sauvegardes |
+| Workers KV Storage, écriture | le namespace des sessions, que wrangler crée au premier `deploy` et que `destroy` supprime |
 | Workers Routes, écriture, sur la zone | le domaine personnalisé du Worker |
 | Account Settings et Memberships, lecture | `wrangler whoami`, que `shopctl` lit pour refuser le mauvais compte |
 | Account Analytics, lecture | `shopctl monitor --env staging` dans le nocturne |
@@ -148,6 +149,21 @@ autre jeton, sur B : Account Analytics et D1 en lecture, rien d'autre (plan
 - Le jeton de service et sa politique « Service Auth » viennent à l'étape 3 :
   son secret ne s'affiche qu'une fois et va droit dans l'environnement
   `staging` du dépôt, qui n'existe qu'après l'étape 2.
+- **Le chemin du webhook, et lui seul, contourne Access** — à l'étape 3, avec
+  l'endpoint Stripe test. Stripe ne passe pas une page de connexion : sans
+  cette exception, chaque événement de paiement reçoit la redirection
+  d'Access, aucune commande n'est écrite et le contrôle Stripe du nocturne
+  attend en vain son webhook. Une seconde application Self-hosted sur le même
+  nom d'hôte, avec deux chemins, `api/webhook` et `api/webhook/*` (le second
+  ne couvre pas le premier), et une seule politique, d'action **Bypass**, sur
+  « Everyone ». Le chemin le plus précis l'emporte sur l'application de la
+  preview. Ce qui protège ce chemin est la signature que le Worker vérifie à
+  chaque requête. Contrôle : un POST non signé y reçoit le 400 du Worker
+  (« Webhook verification failed »), pas une redirection vers
+  `<équipe>.cloudflareaccess.com`.
+- Les e-mails de commande renvoient à la preview : les adresses qui passent
+  les commandes de test de l'étape 4 doivent figurer dans la politique
+  « Allow ».
 
 ## 6. Turnstile
 
@@ -155,7 +171,16 @@ autre jeton, sur B : Account Analytics et D1 en lecture, rien d'autre (plan
 - Sur B, à l'étape 9 : un second widget sur le domaine de production — les
   contenus et réglages de la production sont saisis sur B (ADR 0015).
 - Relever la clé de site. La clé secrète reste lisible dans le tableau de bord ;
-  les deux vont dans Admin → Réglages → Protection à l'étape 3.
+  les deux vont dans Admin → Réglages → Protection anti-robots à l'étape 3.
+- **Le staging porte les clés de test de Cloudflare**, pas celles du widget
+  de A (décision de l'étape 3) : clé de site `1x00000000000000000000AA`, clé
+  secrète `1x0000000000000000000000000000000AA`. Turnstile garde la connexion
+  de l'administration, et le contrôle d'e-mail du nocturne s'y connecte avec
+  le mot de passe : avec un widget réel, aucun script ne passe et ce contrôle
+  est sauté chaque nuit ; avec les clés de test, le widget s'affiche et passe
+  toujours, et le script envoie le jeton factice que seule une clé secrète de
+  test accepte. Derrière Access, le staging n'a pas de robot à arrêter. Le
+  widget réel est éprouvé sur B, en production.
 
 ## 7. GitHub : le plan
 
@@ -227,8 +252,8 @@ Relevés à l'étape 1 — des identifiants, pas des secrets :
 | domaine de production | `cloudflare.productionDomain` | 2 |
 | adresse d'expédition | `email.from` | 2 |
 | nom d'équipe Access, AUD | `cloudflare.stagingAccessTeam` et `cloudflare.stagingAccessAud` | 2 |
-| clé de site Turnstile | Admin → Réglages → Protection | 3 |
-| adresse de l'e-mail de test | variable `NIGHTLY_EMAIL_TO` de l'environnement `staging` | 3 |
+| clé de site Turnstile | Admin → Réglages → Protection anti-robots | 3 |
+| adresse de l'e-mail de test | secret `NIGHTLY_EMAIL_TO` de l'environnement `staging` (une variable s'afficherait en clair dans les journaux) | 3 |
 
 Secrets, créés au moment où leur destination existe :
 
@@ -239,7 +264,7 @@ Secrets, créés au moment où leur destination existe :
 | clé Stripe test restreinte, secret du webhook test | 3 | coffre, Admin → Réglages → Paiements |
 | clé Stripe test du nocturne | 3 | secret `STRIPE_TEST_SECRET_KEY` de `staging` |
 | clé Resend | 3 | coffre |
-| clé secrète Turnstile | 3 | Admin → Réglages → Protection |
+| clé secrète Turnstile | 3 | Admin → Réglages → Protection anti-robots |
 | jeton de service Access | 3 | secrets `CF_ACCESS_CLIENT_ID` et `CF_ACCESS_CLIENT_SECRET` de `staging` |
 | mot de passe admin de staging | 3, `/admin/setup` | secret `MINSHOP_ADMIN_PASSWORD` de `staging` |
 | jeton API de production (B), jeton de lecture de la production | 9 | `CLOUDFLARE_API_TOKEN_PRODUCTION` puis `shopctl repo` ; secret de dépôt `MONITOR_CLOUDFLARE_API_TOKEN` |

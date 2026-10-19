@@ -124,6 +124,9 @@ export const COLUMN_POLICY = {
  * @type {Record<string, string>}
  */
 export const NOT_PERSONAL = {
+  'admin_login_attempts.client_key':
+    "Empreinte HMAC du réseau de qui essaie le mot de passe de l'administration, jamais l'adresse ; " +
+    "effacée quinze minutes après, elle ne se rattache à aucun acheteur.",
   'categories.name': 'Catalogue.',
   'media.original_name': "Le nom du fichier que le marchand a téléversé, pas celui d'un client.",
   'menu_items.label': 'Navigation de la boutique.',
@@ -138,6 +141,9 @@ export const NOT_PERSONAL = {
   'products.name': 'Catalogue.',
   'products.variant_label': 'Catalogue.',
   'products.file_name': 'Catalogue.',
+  'sweep_cursors.name':
+    "Le nom d'un balayage du socle (« guest-access-hide »). Le curseur porte au plus un identifiant " +
+    "public de commande, que la commande anonymisée garde aussi : il ne nomme personne.",
 };
 
 /**

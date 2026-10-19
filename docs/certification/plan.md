@@ -93,7 +93,7 @@ argument de commande. La colonne « où » dit où chacun est posé.
 | Session Wrangler de l'opérateur | secret | Damien (`wrangler login`) | la machine qui exécute `shopctl` |
 | `AUTH_SECRET`, `SECRETS_KEK` | secrets internes | `shopctl provision` | secrets du Worker, tirés par boutique et par environnement, jamais affichés |
 | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` | configuration, pas un secret | Damien (application Access) | `client.yaml` (`cloudflare.stagingAccessTeam`, `cloudflare.stagingAccessAud`), rendus dans les `vars` du seul Worker de staging |
-| Clé Turnstile (site + secret) | secret pour la seconde | Damien | Admin → Réglages → Protection |
+| Clé Turnstile (site + secret) | secret pour la seconde | Damien | Admin → Réglages → Protection anti-robots |
 | `stripe_secret_key` test puis live (clé restreinte de préférence) | secret | Damien | coffre chiffré, Admin → Réglages → Paiements |
 | `stripe_webhook_secret` test puis live | secret | Stripe, à la création de l'endpoint | coffre chiffré |
 | `resend_api_key` | secret | Damien | coffre chiffré |
@@ -101,14 +101,16 @@ argument de commande. La colonne « où » dit où chacun est posé.
 | Mot de passe admin | secret | l'assistant `/admin/setup` | haché en D1 ; celui de staging aussi en secret d'environnement GitHub `MINSHOP_ADMIN_PASSWORD`, pour l'e-mail de test du nocturne |
 | Jeton de service Access de staging | secret | Damien (Zero Trust → Service Auth) | secrets d'environnement GitHub `CF_ACCESS_CLIENT_ID` et `CF_ACCESS_CLIENT_SECRET`, pour le nocturne et les portes distantes |
 | Clé Stripe test du nocturne | secret | Damien, clé restreinte « Checkout Sessions : écriture » | secret d'environnement GitHub `STRIPE_TEST_SECRET_KEY` ; une clé live est refusée |
-| Destinataire de l'e-mail de test, origine de staging | configuration | Damien | variables d'environnement GitHub `NIGHTLY_EMAIL_TO` et, sans `stagingDomain`, `STAGING_URL` |
+| Destinataire de l'e-mail de test, origine de staging | configuration | Damien | secret d'environnement GitHub `NIGHTLY_EMAIL_TO` (une variable s'afficherait en clair dans les journaux, publics sur un dépôt public) et, sans `stagingDomain`, variable `STAGING_URL` |
 | Jeton de lecture de l'analytique de production | secret, lecture seule (« Account Analytics : Read », « D1 : Read ») | Damien, sur le compte de la production | secrets du dépôt `MONITOR_CLOUDFLARE_API_TOKEN` et `MONITOR_CLOUDFLARE_ACCOUNT_ID` — hors de l'environnement `production`, dont les relecteurs bloqueraient chaque nuit |
 
 L'endpoint de webhook Stripe pointe sur `https://<hôte>/api/webhook` et
 s'abonne à cinq événements, ceux que l'adaptateur lit :
 `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
 `checkout.session.async_payment_failed`, `checkout.session.expired` et
-`charge.refunded`.
+`charge.refunded`. Derrière la preview privée, ce chemin est le seul qui
+contourne Access ([guide, §5](comptes-et-acces.md#5-zero-trust-et-access-compte-a)) :
+la signature que le Worker vérifie est ce qui le protège.
 
 ### 2.4 Où tournent les commandes
 
@@ -293,12 +295,16 @@ dans le socle après `v0.3.1`, avec son test.
   secrets sont réécrits, la clé de sauvegarde est conservée ;
 - [x] workflow `Nightly` désactivé dans le dépôt de la boutique jusqu'à
   l'étape 3 : sans base de staging, son job de staging échouerait chaque nuit ;
-- [ ] une pull request de la boutique fait tourner sa CI — §7.2 : celle qui
+- [x] une pull request de la boutique fait tourner sa CI — §7.2 : celle qui
   verse les rapports `--json` de cette étape dans `client/certification/`.
   Rouge au premier passage, pour deux défauts du socle qu'aucune doublure ne
   voyait (remote `core` absent d'un checkout de CI, pas de signature de design
   pour le thème de la boutique) : corrigés en `v0.3.2`, que chaque boutique
-  prend par `shopctl core upgrade --to v0.3.2 --open-pr` avant cette ligne ;
+  prend par `shopctl core upgrade --to v0.3.2 --open-pr` avant cette ligne.
+  Ces montées (pull requests #5) ont trouvé le troisième : la porte de
+  propriété bloquait les fichiers apportés par la release, levée par le label
+  `core-change`, corrigée après `v0.3.2`. Verte le 2026-10-12 sur les deux
+  pull requests #4, vingt jobs sur vingt ;
 - [x] idem pour `canari-certif` (`--from-theme market`, domaine laissé au
   placeholder : elle n'a pas de production), sans `accountId` déclaré :
   `CLOUDFLARE_ACCOUNT_ID` absent du shell au `shopctl new`, qui l'écrirait dans
@@ -309,23 +315,99 @@ Fait avancer : jalon 6 (forge), §7.2.
 
 ### Étape 3 — Staging sur le compte agence
 
-Crée : Worker, D1, deux buckets R2 et un namespace KV par boutique sur A ;
-secrets internes ; données de catalogue.
+Crée, pour `pilote-certif` seule (`canari-certif` attend l'étape 7), sur A :
+le Worker et son domaine personnalisé sur le nom d'hôte de preview, la base D1
+et trois buckets R2 en juridiction `eu` (images, fichiers, sauvegardes avec sa
+règle de conservation de 90 jours), le namespace KV des sessions que wrangler
+crée au premier déploiement, les secrets internes, le catalogue témoin ; dans
+Access, une application de contournement sur le seul chemin du webhook ; dans
+Stripe test, l'endpoint du webhook.
 
-- [ ] `provision --env staging --dry-run`, puis réel, puis une seconde fois :
+Répétée le 2026-10-12 en doublure, contre une boutique `v0.3.2` et un
+`wrangler` de doublure qui choisit désormais son compte comme la version
+4.149 : quatre trous du socle, trouvés avant tout passage en réel, corrigés
+après `v0.3.2` et livrés avec `v0.3.3`. Tant que la boutique porte `v0.3.2`,
+la [fiche de commandes](etape-3-commandes.md) les contourne.
+
+Passée en réel à partir du 2026-10-13, elle en a trouvé deux autres. Le
+staging de `v0.3.2` répondait 500 à chaque enregistrement de
+l'administration, `/admin/setup` compris, données pourtant écrites : un
+Worker sans cache reçoit un `cache` sans `purge`, que le socle prenait pour
+une purge échouée (journaux de `wrangler tail`). Et `shopctl doctor`
+déclarait active une session wrangler qui n'existait pas : la case de
+l'étape 1 reposait sur un faux vert. L'étape 4 passant par l'administration,
+`v0.3.3` est publiée pendant l'étape 3 avec les six correctifs
+(`docs/migrations/v0.3.3.md`), et la montée de version réelle de l'étape 8
+vise `v0.3.4`.
+
+- `shopctl` vérifiait le compte mais ne le passait pas à wrangler. Avec une
+  session qui voit A et B — celle du guide de l'étape 1 —, un wrangler dont
+  l'entrée n'est pas un terminal refuse (« More than one account
+  available »), ou prend le compte qu'il a mis en cache la dernière fois
+  qu'on en a choisi un à la main dans l'arbre : `provision` aurait alors créé
+  la boutique sur B en annonçant A. Contournement : `CLOUDFLARE_ACCOUNT_ID`
+  exporté, égal au manifeste. `catalog import --remote` ne nommait aucun
+  compte ; il passe désormais par la même résolution.
+- `deploy` lisait l'origine à tester dans la sortie de wrangler. Celle-ci
+  liste un domaine personnalisé sans `https://` et n'annonce aucune URL
+  `workers.dev` une fois cette porte fermée : sur une preview privée comme en
+  production (y compris par le workflow `Deploy`), le test de fumée n'avait
+  rien à interroger, ou interrogeait le lien de documentation d'un
+  avertissement. L'origine vient désormais du manifeste. Contournement :
+  `--url https://<nom d'hôte de preview>`.
+- `deploy --json` laissait la sortie de `npm run verify` et du build sur la
+  sortie standard, devant le rapport : le workflow `Deploy` n'aurait pas pu
+  lire l'origine dans un rapport qui n'est plus du JSON, et la preuve versée
+  aurait été illisible. Elle passe désormais sur la sortie d'erreur.
+  Contournement : `npm run verify` et `npm run build` lancés à part, puis
+  `deploy --skip-verify --skip-build --json`.
+- le contrôle d'e-mail du nocturne se connectait à l'administration avec le
+  seul mot de passe : Turnstile activé, la connexion était refusée et le
+  contrôle rouge chaque nuit. Il répond désormais au widget de test par le
+  jeton factice que seules les clés de test acceptent, et devant un widget
+  réel se saute en le disant. Contournement : clés de test enregistrées,
+  case « Enable Turnstile » décochée jusqu'à `v0.3.3`.
+
+`npm run verify` a aussi tourné dans l'arbre de la boutique avec la
+configuration de staging rendue (domaine, `workers.dev` fermé, variables
+d'Access) : vert. C'est ce que `deploy` exécute avant de téléverser.
+
+- [x] `provision --env staging --dry-run`, puis réel, puis une seconde fois :
   le second passage ne crée rien ;
-- [ ] `provision` avec le mauvais compte : refus, code de sortie 4 ;
-- [ ] juridiction `eu` lue sur la base et les buckets via l'API ;
-- [ ] bucket de fichiers inaccessible publiquement ;
-- [ ] `deploy --env staging` : smoke test vert, **et** requête anonyme sur la
+- [x] `provision` avec le mauvais compte : refus, code de sortie 4 ;
+- [x] juridiction `eu` lue sur la base et les buckets via l'API ;
+- [x] bucket de fichiers inaccessible publiquement ;
+- [x] `deploy --env staging` : smoke test vert, **et** requête anonyme sur la
   preview refusée, **et** `workers.dev` fermé ;
-- [ ] `/admin/setup` derrière Access, mot de passe posé ;
-- [ ] `catalog import --remote` du catalogue témoin, puis une seconde fois :
+- [x] `/admin/setup` derrière Access, mot de passe posé ;
+- [x] le chemin du webhook, et lui seul, contourne Access : Stripe ne passe
+  pas une page de connexion (guide de l'étape 1, §5). Un POST non signé y
+  reçoit le 400 du Worker, pas la redirection d'Access ;
+- [x] `catalog import --remote` du catalogue témoin, puis une seconde fois :
   plan vide ;
-- [ ] clés Stripe test, Resend et Turnstile saisies dans l'administration ;
+- [x] clés Stripe test et Resend saisies dans l'administration, et les clés de
+  test de Turnstile (guide de l'étape 1, §6) : le contrôle d'e-mail du
+  nocturne se connecte à l'administration, ce qu'aucun script ne fait devant
+  un widget réel. Le premier `Nightly` du 2026-10-13 a trouvé une vraie clé
+  de site et sauté l'e-mail ; clés de test posées, le second
+  ([run 38466884657](https://github.com/DamienGR/shop-pilote-certif/actions/runs/38466884657))
+  s'est connecté et l'a envoyé ;
 - [ ] secrets et variables du nocturne posés dans l'environnement `staging`
   du dépôt (§2.3), puis le workflow `Nightly` réactivé et lancé à la main :
-  vert, ou chaque contrôle sauté nommé dans son avertissement.
+  vert, ou chaque contrôle sauté nommé dans son avertissement. Posés et lancé
+  le 2026-10-13, relancé après les clés de test de Turnstile
+  ([run 38466884657](https://github.com/DamienGR/shop-pilote-certif/actions/runs/38466884657)) :
+  sauvegarde, restauration, porte de sécurité, Stripe et e-mail verts. Deux
+  rouges laissent la ligne ouverte. La porte navigateur cherchait l'image
+  principale d'une fiche sous la seule forme d'une galerie (défaut du test,
+  corrigé par la pull request #59, à prendre par une montée de version). Le
+  CPU p99 dépasse les 10 ms du plan gratuit — renvoyé à l'étape 6.
+
+Preuves dans `client/certification/etape-3/` de `pilote-certif` (pull
+request #7). Le premier `Nightly` a aussi montré que `NIGHTLY_EMAIL_TO`, posée
+en variable, s'affiche en clair dans un journal public : c'est désormais un
+secret (pull request #58). Le `Nightly` de `v0.3.3` ne lit que la variable :
+elle passe en secret à la prochaine montée de version de la boutique.
 
 Fait avancer : jalon 6 (« provisioning dans un compte de test »), jalon 4
 (import réel), §8.4 en partie.
@@ -334,59 +416,253 @@ Fait avancer : jalon 6 (« provisioning dans un compte de test »), jalon 4
 
 Crée : des commandes Stripe test, des e-mails réels vers des boîtes de test.
 
-- [ ] le parcours du §8.1 ligne par ligne, sur desktop et mobile ;
-- [ ] les sept lignes du §8.2, chacune avec l'identifiant Stripe, la ligne D1
-  et le stock avant/après ;
-- [ ] un code promotionnel réel : remise sur la commande, TVA calculée après
-  remise (ligne ouverte du jalon 3) ;
-- [ ] remboursement partiel puis total depuis Stripe : la commande suit ;
-- [ ] webhook rejoué depuis le tableau de bord Stripe : aucune seconde
-  commande ;
-- [ ] expédition saisie dans l'administration : l'e-mail d'expédition part
-  (ligne ouverte du jalon 7) ;
-- [ ] Resend rendu indisponible (clé révoquée le temps du test) : la commande
-  est écrite, l'e-mail part au balayage suivant — §8.7 ;
-- [ ] export des commandes, pages légales publiées, case CGV — §8.1.
+Répétée le 2026-10-13 en doublure, contre le Worker construit de
+`pilote-certif` en `v0.3.3`, le catalogue témoin, et Stripe et Resend simulés :
+quatre commandes, le webhook rejoué, deux remboursements, l'expédition, la
+panne de Resend rattrapée par le cron, l'export. Trois défauts, corrigés après
+`v0.3.3` et livrés avec `v0.3.4` : l'option de livraison gratuite s'appelait
+« Free shipping » sur la page de Stripe et dans la commande ; la version texte
+des e-mails de commande omettait la TVA ; et la documentation du socle disait
+qu'une page publiée entre seule dans le pied de page, qui est un menu depuis la
+migration 0028. Le catalogue témoin, vingt produits pour vingt-quatre par page,
+ne montre jamais la pagination : la [fiche de commandes](etape-4-commandes.md)
+ajoute cinq produits le temps de la voir.
+
+Passée en réel le 2026-10-14, elle en a trouvé quatre autres, corrigés dans le
+socle (pull request #64) et livrés avec `v0.3.4`.
+
+- Les quatre pages légales n'avaient pas d'identifiant public : la migration
+  0040 les insère après la 0033, et rien ne lance
+  `scripts/backfill-public-ids.mjs`. L'administration les liait à
+  `/admin/pages/null/edit`, et aucune ne pouvait être publiée. Toute boutique
+  créée depuis la 0040 est touchée. Contournement : le script lancé avec
+  `--remote` sur la base de staging, qui n'a rempli que ces quatre lignes.
+- `/express` répète la case CGV dans le formulaire de chaque moyen de
+  paiement : deux moyens, deux cases. Le panier n'en montre qu'une.
+- Le paiement de démonstration est offert à côté de Stripe : `enabledMethods`
+  l'ajoute tant que l'administration ne le désactive pas, et n'importe quel
+  visiteur passe alors une commande sans payer, stock décrémenté. C'était le
+  second moyen de `/express`. « Demo checkout » décoché dans les réglages de
+  la boutique ne la fermait pas : `/checkout` ne vérifiait que la
+  configuration du moyen, toujours vraie pour la démo, et un POST forgé y
+  passait encore. Le staging en `v0.3.3` reste ouvert ainsi, derrière Access ;
+  la production de l'étape 9 doit porter `v0.3.4`. Depuis, la démo n'est
+  offerte qu'en l'absence de tout vrai moyen, et chaque entrée exige un moyen
+  activé.
+- Les transporteurs de l'expédition sont américains (USPS, UPS, FedEx, DHL,
+  Other), quand les tarifs par défaut s'appellent Colissimo. Contournement :
+  « Other », sans lien de suivi dans l'e-mail.
+
+Les images des e-mails ne s'affichent pas sur le staging : la preview les sert
+derrière Access, qui répond par sa page de connexion. Attendu ; c'est en
+production, à l'étape 9, qu'elles se vérifient.
+
+- [x] le parcours du §8.1 ligne par ligne, sur desktop et mobile ;
+- [x] les sept lignes du §8.2, chacune avec l'identifiant Stripe, la ligne D1
+  et le stock avant/après : quatre commandes, montants de Stripe égaux à ceux
+  de D1, une commande par session, stock décrémenté une fois ;
+- [x] un code promotionnel réel : remise sur la commande, TVA calculée après
+  remise (ligne ouverte du jalon 3). `CERTIF10` sur B : 42,40 − 4,24 + 5,90 =
+  44,06 €, dont TVA 7,34 € ;
+- [x] remboursement partiel puis total depuis Stripe : la commande suit ;
+- [x] webhook rejoué depuis le tableau de bord Stripe : aucune seconde
+  commande. Le `charge.refunded` rejoué ne compte pas deux fois ;
+- [x] expédition saisie dans l'administration : l'e-mail d'expédition part
+  (ligne ouverte du jalon 7), avec le transporteur « Other » ;
+- [x] Resend rendu indisponible (clé révoquée le temps du test) : la commande
+  est écrite, l'e-mail part au balayage suivant — §8.7. Nouvelle clé collée
+  trois minutes après la commande, les deux e-mails partis à la deuxième
+  tentative ;
+- [x] export des commandes, pages légales publiées, case CGV — §8.1. Pages
+  publiées après le contournement de leur identifiant public.
+
+Preuves dans `client/certification/etape-4/` de `pilote-certif` (pull
+request #9).
 
 Fait avancer : jalon 7 (Stripe test, notification d'expédition), jalon 3
 (remises), §8.1, §8.2.
 
 ### Étape 5 — Sécurité sur la boutique déployée
 
-Lecture seule, plus quelques requêtes hostiles vers sa propre boutique.
+Lecture seule, plus quelques requêtes hostiles vers sa propre boutique, et une
+commande de test sous capture des journaux.
 
-- [ ] les neuf lignes du §8.4 contre l'URL de staging, avec l'outillage de
-  l'étape 0 (`BASE_URL=… npm run test:security:remote`). Elle échoue si
+Répétée le 2026-10-14 en doublure, contre le Worker construit de
+`pilote-certif` en `v0.3.3` derrière une doublure d'Access, Stripe et Resend
+simulés : la porte distante, l'étape 4 rejouée sous capture, `npm audit`, le
+scan de secrets sur l'arbre, l'historique public et le build de staging. La
+boutique a tenu ; deux défauts, corrigés après `v0.3.3` et livrés avec
+`v0.3.4`. Cloudflare nomme un compte « <adresse>'s Account », et `shopctl`
+recopiait ce nom : l'adresse de connexion de l'opérateur est publiée dans cinq
+preuves de l'étape 3 et dans les journaux et artefacts du `Nightly` ; elle est
+masquée à la source, et la [fiche de commandes](etape-5-commandes.md) dit quoi
+faire de ce qui est déjà publié. `npm audit` complet trouvait deux alertes
+élevées dans `sharp`, outil de test seulement, que l'audit de production du
+`Nightly` ne voyait pas ; `sharp` est forcé en 0.35.5. L'outillage de l'étape 0
+ne couvrait pas quatre lignes, ajoutées : webhooks non signés et forgés, champs
+de carte et limiteurs (`--limiteurs`) dans la porte distante, relevé d'une
+capture de `wrangler tail` (`npm run test:logs:remote`), scan de tout
+l'historique Git (`npm run check:secrets:history`). L'étape se passe donc en
+`v0.3.4` : la fiche commence par la montée, ce qui coche d'avance la ligne de
+montée réelle de l'étape 8.
+
+Passée en réel les 2026-10-14 et 2026-10-15, en `v0.3.4`. La boutique a tenu,
+sauf ses limiteurs ; cinq défauts, dont quatre corrigés dans le socle par la
+même pull request que ce bilan.
+
+- **Les limiteurs de débit sont actifs mais très permissifs.** Les liaisons
+  sont sur la version déployée et le code passe par elles, sans erreur ; mais
+  la porte n'obtient aucun 429 en trois fois la limite, 232 recherches une par
+  une en 70 s passent toutes (limite : 60 par minute), et 1 000 recherches, 50
+  en parallèle, donnent un premier 429 après environ 450. Cloudflare documente
+  ce limiteur comme permissif, compté par localisation et mis en cache par
+  machine ; les doublures, qui comptent exactement, ne pouvaient pas le voir.
+  Il arrête une inondation de la recherche ou du checkout, pas un essai patient
+  de mots de passe sur une administration sans Access, ce qu'est la
+  production. Décidé : un compteur exact des échecs de connexion, et la porte
+  recalibrée, en `v0.3.5`. Livrés, et rejoués contre le staging (ci-dessous).
+- **`deploy` s'arrêtait dans le shell de la fiche.** Elle exporte
+  `CLOUDFLARE_ACCOUNT_ID`, dont le test de `shopctl new` héritait par
+  `npm run verify` ; et le test du scaffold suivait le `core.autocrlf=true` du
+  poste. Les deux tests sont désormais indépendants de l'environnement de
+  l'opérateur.
+- **L'historique de chaque boutique en `v0.3.4` est rouge** sur un JWT
+  d'exemple signé « sig », commité par le socle (`cfada29`) puis retiré de
+  l'arbre. La règle exige désormais une signature de vraie longueur.
+- **Chaque `HEAD` sur une image levait une exception** dans les journaux :
+  Astro le confie au gestionnaire `GET`, qui le mettait en cache, ce que l'API
+  Cache refuse. La réponse restait un 200.
+
+La capture de `wrangler tail` a été échantillonnée (`overload`) pendant les
+rafales de `--limiteurs`, et elle a été refaite, la porte passée sans eux. Les
+en-têtes d'identité d'Access y arrivent déjà masqués par la plateforme.
+`NIGHTLY_EMAIL_TO`, encore une variable, a été posé en secret avant le
+`Nightly` d'après la montée, comme le demandent les notes de `v0.3.4`.
+
+Le même jour, la ligne des limiteurs, d'après la
+[fiche](etape-5-commandes.md#après-v035--fermer-la-ligne-des-limiteurs) :
+`v0.3.5` montée (pull request #12 de la boutique) et déployée sans
+contournement, `CLOUDFLARE_ACCOUNT_ID` exporté et `core.autocrlf=true` sur le
+poste, migration 0044 appliquée ; la porte, `--limiteurs` compris, 18
+contrôles sur 18. Juste après, l'opérateur est entré dans l'administration :
+sa session du matin était encore valable, et son navigateur sort en IPv6, un
+autre réseau, pour le compteur, que le terminal WSL en IPv4. Le compteur
+refuse les nouvelles tentatives d'un réseau ; il ne ferme pas une session
+ouverte.
+
+- [x] les neuf lignes du §8.4 contre l'URL de staging
+  (`BASE_URL=… npm run test:security:remote -- --limiteurs`). Elle échoue si
   l'admin de staging est en mode Access seul : un jeton de service est une
-  identité Access valide, et il y entrerait — staging garde un mot de passe ;
-- [ ] `wrangler tail` pendant l'étape 4 rejouée : aucune adresse e-mail ni
-  postale dans les logs ;
-- [ ] `npm audit` racine et `mcp/` : aucune vulnérabilité élevée ou critique
-  non justifiée ;
-- [ ] scan de secrets sur le dépôt de la boutique et ses artefacts de build.
+  identité Access valide, et il y entrerait — staging garde un mot de passe.
+  En `v0.3.4`, 15 contrôles sur 15 et les trois limiteurs en échec ; en
+  `v0.3.5`, 18 sur 18 : la recherche refuse dans ses 250 premières requêtes
+  et le checkout dans ses 100 premières, 50 à la fois ; la connexion refuse la
+  sixième tentative du passage, par le compteur exact (`Retry-After` au-delà
+  de la minute de Cloudflare) ;
+- [x] `wrangler tail` pendant une commande, un remboursement, une expédition
+  et la porte distante : aucune adresse e-mail ni postale, aucun jeton ni
+  secret dans ce que la boutique écrit ni dans les URL. 531 événements sans
+  échantillonnage ; la trace du webhook de la commande, dans Observability, ne
+  porte aucune donnée personnelle ;
+- [x] `npm audit` racine et `mcp/`, outils de développement compris : aucune
+  vulnérabilité élevée ou critique non justifiée. Aucune, toutes sévérités ;
+- [x] scan de secrets sur l'arbre de la boutique, tout son historique et ses
+  artefacts de build ; ni secret ni adresse dans les journaux et artefacts
+  publics du `Nightly`. L'historique, vert avec la règle corrigée ; les
+  journaux et artefacts des `Nightly` d'avant la montée supprimés, ceux
+  d'après relus.
 
-Produit : le **rapport de sécurité**.
+Preuves dans `client/certification/etape-5/` de `pilote-certif` (pull
+requests #11, puis #13 pour la ligne des limiteurs).
+
+Produit : le **rapport de sécurité**, [`rapport-securite.md`](rapport-securite.md) :
+les neuf lignes du §8.4 tenues sur le staging, les limiteurs depuis `v0.3.5` ;
+la porte se rejoue contre la production à l'étape 9.
+
+Fait avancer : jalon 10 (§8.4, rapport de sécurité), jalon 8 (journaux et
+portes de sécurité sur un déploiement réel).
 
 ### Étape 6 — Accessibilité, navigateurs, performance
 
-- [ ] porte navigateur contre l'URL de staging — §8.5 (`BASE_URL=… npm run
-  test:browser:remote`) ;
+- [x] porte navigateur contre l'URL de staging — §8.5 (`BASE_URL=… npm run
+  test:browser:remote`). Rouge en `v0.3.8` sur le contraste de la page CGV,
+  verte en `v0.3.9` : 85 passés, 5 sautés avec leur raison ;
 - [ ] parcours d'achat à la main sur Chrome et Firefox desktop, Safari sur
-  iPhone, Chrome sur Android ;
-- [ ] Lighthouse mobile sur l'accueil, une catégorie, une fiche produit, le
-  panier : ≥ 90 en performance, accessibilité et SEO ; LCP, CLS, INP relevés ;
-- [ ] charge de quinze minutes : aucune erreur Worker, consommation du plan
+  iPhone, Chrome sur Android. Une commande payée sur quatre (#6) : trois achats
+  restent à faire, avec leur navigateur, sa version et leur numéro ;
+- [x] Lighthouse mobile sur l'accueil, une catégorie, une fiche produit, le
+  panier : ≥ 90 en performance, accessibilité et SEO ; LCP, CLS, INP relevés.
+  100 / 100 / 92 partout (le SEO plafonne derrière Access), LCP 1,0 à 1,6 s,
+  CLS 0, INP 24 ms ;
+- [x] charge de quinze minutes : aucune erreur Worker, consommation du plan
   Workers Free relevée (`npm run test:load:remote -- --json charge.json`,
-  puis `shopctl monitor --env staging --hours 1`) ;
-- [ ] cinq checkouts concurrents sur la dernière unité : une seule commande
+  puis `shopctl monitor --env staging --hours 1`). 6 528 requêtes, 0 erreur ;
+  monitor vert, aucune invocation arrêtée ;
+- [x] cinq checkouts concurrents sur la dernière unité : une seule commande
   (`npm run test:last-unit:remote -- --product <slug>`, stock mis à 1 dans
-  l'administration avant).
+  l'administration avant). Une session, quatre `409`, aucune survente.
 
+Le CPU, constaté à l'étape 3 : sur le staging, l'administration prend 13 à
+43 ms de CPU par requête, la connexion 35 ms, `GET /` 26 ms à froid, le cron
+1 à 4 ms ; le plan gratuit annonce 10 ms. Cloudflare tolère un dépassement
+occasionnel par isolat et n'interrompt (erreur 1102, issue `exceededCpu`)
+qu'un Worker qui le franchit régulièrement : aucune invocation interrompue à
+ce jour. Mesurer à chaud (charge) et à froid (première visite après un temps
+mort) séparément, page par page, vitrine d'abord ; optimiser autant que
+possible avant de choisir entre le plan Workers Paid et une dérogation. Le
+seuil de `shopctl monitor` juge aujourd'hui le p99 : le compte des
+invocations `exceededCpu`, qu'il regroupe déjà par statut, est le signal qui
+compte.
+
+Répétée en doublure le 2026-10-15 ; ce qu'elle a trouvé est corrigé dans
+`v0.3.6`, et la fiche de passage, qui monte la boutique en `v0.3.8`, est
+[etape-6-commandes.md](etape-6-commandes.md).
+Le monitor y juge les invocations arrêtées et relève le p99 sans le juger ; la
+vitrine lit sa base en un appel par page (à chaud, la fiche produit passe de
+13 à 16 ms à 8 ms sur le Worker construit) ; `npm run test:cpu:remote` relève
+le CPU route par route d'une capture de `wrangler tail`, à froid après le
+déploiement et à chaud sous la charge. Le cache de Workers, désactivé sur
+toutes les boutiques, est la troisième issue à peser avec le plan payant et la
+dérogation.
 La charge déclenche les limiteurs de débit si elle vient d'une seule adresse :
 le scénario doit les contourner explicitement ou les compter comme attendus,
 pas les désactiver.
 
-Produit : le **rapport de performance**.
+Passée en réel le 2026-10-19, en `v0.3.8` montée depuis `v0.3.5` (pull request
+#15 de la boutique, migration 0045), puis en `v0.3.9` pour la porte
+navigateur (#17). La boutique a tenu sous la charge et sur la dernière unité ;
+sept défauts : quatre corrigés dans le socle ou la fiche, un dit dans la
+fiche, un réglé sur le jeton du monitor, un laissé ouvert (le `trap` de
+l'intégration D1 laisse un `wrangler dev` en vie).
+
+- **La prose des pages de contenu tombait sous AA.** Le bandeau « Brouillon »
+  des pages légales (migration 0040) est une citation avec du gras et du code,
+  et le socle figeait la citation en `#6b7280` et le code sur `#f5f5f4` :
+  4,37:1 sur le papier d'atelier. Le `Nightly` de l'étape 5 l'avait vu ; la
+  porte du socle ne le pouvait pas, sa page de contenu n'ayant pas de citation.
+  Le jeu d'essai porte désormais le bandeau, la porte échouait alors sur les
+  quatre thèmes ; la prose prend ses couleurs du thème en `v0.3.9`.
+- **Lighthouse recopie le jeton de service dans ses rapports**, JSON et HTML.
+  La fiche les masque, et `check:secrets` refuse le secret depuis `v0.3.9`.
+  Sous WSL, il laissait aussi ses profils Chrome, cookies d'Access compris,
+  dans la boutique : il tourne désormais depuis un dossier jetable.
+- **`wrangler tail` perd des événements sans le dire** : 37 sur 46 à froid,
+  42 % sous la charge. Observability complète ce qui manque.
+- **Le jeton du monitor manquait « Account Settings : Read »**, dont
+  `wrangler whoami` a besoin. Le jeton de lecture de la production, documenté
+  sans ce droit, est à vérifier à l'étape 9.
+
+Le CPU : à chaud, la vitrine tient sous 10 ms en médiane (3 à 6 ms) ; à froid,
+la première requête d'une route coûte 35 à 53 ms ; aucune invocation arrêtée.
+Les trois issues, plan gratuit sous dérogation, Workers Paid ou cache de
+Workers, sont posées dans le rapport ; le choix reste à faire.
+
+Preuves dans `client/certification/etape-6/` de `pilote-certif` (pull request
+#18).
+
+Produit : le **rapport de performance**,
+[`rapport-performance.md`](rapport-performance.md) : quatre lignes sur cinq
+tenues, celle des parcours d'achat ouverte, et la décision sur le CPU posée.
 
 ### Étape 7 — Isolation de deux boutiques déployées
 
@@ -398,6 +674,32 @@ Crée : la boutique `canari-certif` en staging sur A.
 - [ ] `shopctl destroy --env staging --confirm canari-certif` : tout part,
   et rien de `pilote-certif` ; si le bucket `-backups` porte des archives, R2 le
   refuse et la base reste — c'est le comportement attendu, à constater.
+
+Répétée en doublure le 2026-10-19 : une canari montée de `v0.3.2` en `v0.3.9`
+d'un seul saut, sans conflit, à côté d'un pilote en `v0.3.9`, sur un
+`wrangler` de doublure qui voit deux comptes. Quatre défauts de `shopctl`,
+que le passage en réel aurait tous rencontrés, corrigés dans `v0.3.10` ; la
+fiche de passage, qui monte la canari en `v0.3.10`, est
+[etape-7-commandes.md](etape-7-commandes.md).
+
+- **Le premier déploiement d'une boutique sans Access finissait en code 6.**
+  Tant que `/admin/setup` n'a pas tourné, la vitrine renvoie chaque page vers
+  lui, et le test de fumée lisait ces redirections comme une vitrine absente.
+  La canari sur workers.dev l'aurait vu, et la première production de chaque
+  boutique à l'étape 9 aussi.
+- **`destroy` laissait le namespace KV des sessions**, que wrangler crée au
+  premier déploiement sous `<worker>-session` et qu'aucun fichier de la
+  boutique ne nomme : « tout part » était faux.
+- **La commande proposée pour vider un bucket refusé ne vidait rien** : sans
+  `--remote`, wrangler 4 vide son simulateur local et répond « Delete
+  complete ».
+- **Le refus de l'import croisé conseillait `prepare-client.mjs --env`**, qui
+  rend un identifiant de base factice ; il renvoie vers `shopctl provision`.
+
+La porte d'isolation supprime désormais le staging de la canari à côté du
+pilote et vérifie que seules ses six ressources quittent le compte. Non
+répétés, faute de doublure : Access, la lecture des liaisons déployées, les
+limiteurs de Cloudflare ; la fiche les constate en réel.
 
 Fait avancer : §8.3 (lignes déployées), jalon 6 (`destroy` réel).
 
@@ -416,10 +718,14 @@ Crée : des archives de sauvegarde ; une restauration sur le compte B.
   bien échouer le run ;
 - [ ] média R2 supprimé à la main : la page dégrade sans erreur ;
 - [ ] rollback Worker vers la version précédente, puis retour — jalon 9 ;
-- [ ] montée de version réelle : un tag `v0.3.3` proposé par
+- [x] montée de version réelle : un tag `v0.3.4` proposé par
   `shopctl core upgrade --open-pr`, fusionné, déployé en staging. `v0.3.2` est
   déjà passée par ce chemin à l'étape 2, mais avant tout déploiement : la
-  ligne demande une montée sur une boutique qui tourne ;
+  ligne demande une montée sur une boutique qui tourne. Faite en tête de
+  l'étape 5, le 2026-10-14 : pull request #10 de `pilote-certif`, CI verte,
+  fusionnée, déployée en staging avec la migration 0043. Les deux premiers
+  `deploy` se sont arrêtés à leur `npm run verify`, sans rien téléverser
+  (étape 5) ;
 - [ ] rotation de `AUTH_SECRET` : les sessions tombent, rien d'autre ;
 - [ ] mot de passe admin perdu : procédure exécutée telle que le runbook la
   décrit ;
@@ -441,6 +747,10 @@ Crée : la production de `pilote-certif` sur B. Détruit : le staging sur A.
 - [ ] `deploy --env production` par le workflow `Deploy`, sauvegarde préalable
   verte, approbation GitHub ;
 - [ ] domaine de production, domaine d'images, smoke test public vert ;
+- [ ] la porte distante contre la production,
+  `npm run test:security:remote -- --limiteurs` : sans Access devant
+  l'administration, la connexion refuse au plus tard la sixième tentative
+  ([rapport de sécurité](rapport-securite.md)) ;
 - [ ] `shopctl destroy --env staging` sur A.
 
 Fait avancer : jalon 6 (production), §7.4, §9.
@@ -477,8 +787,8 @@ Fait avancer : jalon 7 (critère de sortie), §8.8.
 | Livrable | Produit par |
 |---|---|
 | rapport de tests | étapes 3, 4, 6, 7 |
-| rapport de sécurité | étape 5 |
-| rapport de performance | étape 6 |
+| [rapport de sécurité](rapport-securite.md) | étape 5 |
+| [rapport de performance](rapport-performance.md) | étape 6 |
 | preuve de restauration | étape 8 |
 | validation TVA/facturation | étape 11 |
 | checklist de lancement | étape 9, rejouable pour chaque boutique |

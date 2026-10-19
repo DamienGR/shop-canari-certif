@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 // .mjs like its neighbours: tsconfig pins `types` to the Cloudflare types, so
 // node builtins have no declarations in a .ts file here.
 import { createServer } from 'node:http';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { EXIT_CODES } from '../../shopctl/src/errors.mjs';
@@ -80,6 +80,38 @@ describe('the smoke test', () => {
     expect(result).toMatchObject({ ok: false, severity: 'warn' });
   });
 
+  // Every first deployment no Access application hides — a staging on
+  // workers.dev, the first production of every shop — answers this way until
+  // someone runs the wizard. Failing it turned each of them red after the
+  // upload (found rehearsing certification step 7); passing it silently would
+  // vouch for a storefront nobody has seen.
+  it('warns, rather than fails, a shop that is not installed yet', () => {
+    const toSetup = { ok: true, status: 302, body: '', headers: { location: 'https://shop.example/admin/setup' }, error: null };
+    const verdict = evaluateSmoke({
+      ...ok,
+      storefront: toSetup,
+      catalogue: toSetup,
+      robots: toSetup,
+      'admin-setup-open': { ok: true, status: 200, body: '<html lang="fr">', headers: {}, error: null },
+    });
+    expect(verdict.ok).toBe(true);
+    for (const id of ['storefront', 'catalogue', 'robots']) {
+      const result = verdict.results.find((check) => check.id === id);
+      expect(result).toMatchObject({ ok: false, severity: 'warn', status: 302 });
+      expect(result.message).toMatch(/pas encore installée/);
+    }
+  });
+
+  // Only the wizard. A redirect anywhere else is still a storefront that does
+  // not answer, and a 302 with no destination proves nothing about the base.
+  it('still fails a redirect that does not lead to the wizard', () => {
+    for (const headers of [{ location: '/admin/login' }, { location: 'https://ailleurs.example/admin/setup-guide' }, {}]) {
+      const verdict = evaluateSmoke({ ...ok, storefront: { ok: true, status: 302, body: '', headers, error: null } });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.results.find((result) => result.id === 'storefront').severity).toBe('fail');
+    }
+  });
+
   // The failure this whole module exists to prevent: a deployment announced as
   // green because the check could not reach it.
   it('never reads an unreachable site as a pass', () => {
@@ -105,6 +137,21 @@ describe('the smoke test', () => {
 
   it('returns no origin rather than a guess when wrangler announces none', () => {
     expect(originFromDeployOutput('Total Upload: 512.00 KiB\nUploaded worker')).toBeNull();
+  });
+
+  // What wrangler 4 prints once workers.dev is shut: the custom domain bare,
+  // no scheme, and no workers.dev line at all (renderRoute in its
+  // deploy-helpers). Read as the shop's origin, never the link in a warning.
+  it('reads a custom domain, which wrangler lists without a scheme', () => {
+    const output = [
+      '▲ [WARNING] See https://developers.cloudflare.com/workers/configuration/routing/',
+      'Uploaded minshop-atelier-staging (2.11 sec)',
+      'Deployed minshop-atelier-staging triggers (0.42 sec)',
+      '  preview.boutique.example.fr (custom domain)',
+      '  schedule: */5 * * * *',
+    ].join('\n');
+    expect(originFromDeployOutput(output)).toBe('https://preview.boutique.example.fr');
+    expect(originFromDeployOutput(output.split('\n').filter((line) => !line.includes('custom domain')).join('\n'))).toBeNull();
   });
 });
 
@@ -145,7 +192,9 @@ describe('the smoke test against a live origin', () => {
     server = createServer((request, response) => {
       const route = routes.get(new URL(request.url, 'http://x').pathname);
       if (!route) return response.writeHead(404).end('not found');
-      response.writeHead(route.status, { 'content-type': 'text/html' }).end(route.body ?? '');
+      response
+        .writeHead(route.status, { 'content-type': 'text/html', ...(route.location ? { location: route.location } : {}) })
+        .end(route.body ?? '');
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     origin = `http://127.0.0.1:${server.address().port}`;
@@ -171,6 +220,24 @@ describe('the smoke test against a live origin', () => {
     routes.set('/admin', { status: 302 });
     const report = await runSmoke(origin);
     expect(report.results.find((result) => result.id === 'admin-closed')).toMatchObject({ ok: true, status: 302 });
+  });
+
+  // The shape the built Worker gives a fresh database: every storefront path
+  // redirects to the wizard, which answers 200. Read off the wire, location
+  // header and all, the deployment is a warning and not a failure.
+  it('passes, with warnings, a shop whose wizard has not run', async () => {
+    for (const path of ['/', '/products', '/robots.txt']) routes.set(path, { status: 302, location: `${origin}/admin/setup` });
+    routes.set('/admin', { status: 303, location: '/admin/setup' });
+    routes.set('/admin/setup', { status: 200, body: '<!doctype html><html lang="fr">' });
+
+    const report = await runSmoke(origin);
+    expect(report.ok).toBe(true);
+    expect(report.results.filter((result) => !result.ok).map((result) => result.id)).toEqual([
+      'storefront',
+      'catalogue',
+      'robots',
+      'admin-setup-open',
+    ]);
   });
 
   it('runs the gated checks instead when the environment is private', async () => {
@@ -300,6 +367,36 @@ describe('shopctl deploy', () => {
       expect(result.status, result.stderr).toBe(EXIT_CODES.ok);
       expect(result.stdout + result.stderr).toMatch(/sans cloudflare\.stagingAccessTeam ni cloudflare\.stagingAccessAud/);
       expect(readFileSync(join(target.root, 'wrangler.jsonc'), 'utf8')).toContain('"CF_ACCESS_AUD": ""');
+    });
+
+    // The Deploy workflow reads the origin out of this report, so stdout is the
+    // report and nothing else — the suite and the build it runs included.
+    it('keeps the verification and build output off a --json report', () => {
+      const target = provisioned();
+      const pkg = join(target.root, 'package.json');
+      const scripts = { verify: 'node -e "console.log(\'sortie de verify\')"', build: 'node -e "console.log(\'sortie du build\')"' };
+      writeFileSync(pkg, JSON.stringify({ ...JSON.parse(readFileSync(pkg, 'utf8')), scripts }, null, 2));
+      const result = target.json(['deploy', '--env', 'staging', '--skip-smoke']);
+      expect(result.status, result.stderr).toBe(EXIT_CODES.ok);
+      expect(result.report.command).toBe('deploy');
+      expect(result.stderr).toContain('sortie de verify');
+      expect(result.stderr).toContain('sortie du build');
+    });
+
+    // The route this command rendered is the origin it tests: a preview behind
+    // its hostname, a production behind its domain. Neither is in wrangler's
+    // output with a scheme, and workers.dev is shut on both.
+    it('smoke-tests a preview at its hostname and a production at its domain', () => {
+      const target = provisioned('staging', { cloudflare: { stagingDomain: 'preview.boutique.example.fr' } });
+      const staging = target.json(['deploy', '--env', 'staging', ...FAST, '--skip-smoke']);
+      expect(staging.status, staging.stderr).toBe(EXIT_CODES.ok);
+      expect(staging.report.origin).toBe('https://preview.boutique.example.fr');
+
+      expect(target.run(['provision', '--env', 'production']).status).toBe(EXIT_CODES.ok);
+      expect(target.run(['backup', 'keygen']).status).toBe(EXIT_CODES.ok);
+      const production = target.json(['deploy', '--env', 'production', '--yes', ...FAST, '--skip-smoke']);
+      expect(production.status, production.stderr).toBe(EXIT_CODES.ok);
+      expect(production.report.origin).toBe('https://boutique.example.fr');
     });
 
     it('migrates, uploads the environment it was asked for, and reports the origin', () => {
