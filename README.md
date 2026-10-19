@@ -397,7 +397,7 @@ npm run verify
 contre le Worker construit les couvre toutes — parcours desktop et mobile, axe,
 navigation clavier, zoom, parcours sans JavaScript, et la régression visuelle
 sous forme de signature du design calculé plutôt que de comparaison de pixels
-(voir AGENTS.md → « The browser gate »). Elle n'est pas dans `npm run verify` :
+(voir docs/agents/browser-gate.md). Elle n'est pas dans `npm run verify` :
 c'est la seule porte qui demande un navigateur, et la CI lui donne son propre
 job par thème.
 
@@ -431,6 +431,8 @@ générée.
 en relisant `dist/` : Vite fige `import.meta.env.*` à la construction, donc une
 valeur qui n'existe que dans un `.dev.vars` non suivi peut se retrouver compilée
 dans un bundle dont la moitié est servie aux navigateurs.
+`npm run check:secrets:history` relit tout l'historique que les refs atteignent
+encore : une clé supprimée de l'arbre reste dans chaque clone fait depuis.
 
 Une boutique ne pourra pas être déployée lorsque :
 

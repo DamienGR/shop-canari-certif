@@ -47,9 +47,27 @@ export function wranglerCommand(cwd = process.cwd()) {
   return existsSync(local) ? { command: local, prefix: [] } : { command: 'npx', prefix: ['--no-install', 'wrangler'] };
 }
 
+/**
+ * The account `resolveAccount()` settled on, handed to every wrangler started
+ * after it.
+ *
+ * Resolving the account is not enough: wrangler picks its own. With
+ * `CLOUDFLARE_ACCOUNT_ID` unset and a session that sees two accounts — which
+ * is exactly what an agency user invited onto the client's account has
+ * (ADR 0015) — a wrangler whose stdin is not a terminal refuses with "More than
+ * one account available", and one that once ran interactively in this tree
+ * uses the account it cached in `node_modules/.cache/wrangler` instead, whatever
+ * this command just checked. The first stops the run; the second creates the
+ * shop's resources on the other account while the report names the right one.
+ * Pinning the variable on the child is the one setting wrangler ranks above
+ * its cache and below nothing this CLI renders.
+ */
+let pinnedAccount = null;
+
 export function wrangler(args, { cwd = process.cwd(), input, allowFailure = false, env = process.env, maxBuffer } = {}) {
   const { command, prefix } = wranglerCommand(cwd);
-  return capture(command, [...prefix, ...args], { cwd, input, allowFailure, env, maxBuffer });
+  const childEnv = pinnedAccount ? { ...env, CLOUDFLARE_ACCOUNT_ID: pinnedAccount } : env;
+  return capture(command, [...prefix, ...args], { cwd, input, allowFailure, env: childEnv, maxBuffer });
 }
 
 /**
@@ -79,12 +97,32 @@ export function extractJson(output, what) {
   }
 }
 
+/** An e-mail address, as `logSafe()` recognises one in the Worker. */
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+
+/**
+ * An account's name, as every report and every line of this CLI shows it.
+ *
+ * Cloudflare names an account after its owner's address until somebody
+ * renames it — "jeanne@example.fr's Account" — and that name used to travel
+ * verbatim into the `--json` reports, the backup manifest, and the CI log of
+ * every nightly run: a public log, on a pilot shop's public repository
+ * (certification, étape 5). The id is what identifies the account; the name
+ * is a label for a human, and it keeps its shape without the address.
+ */
+export function accountLabel(name) {
+  return String(name ?? '').replace(EMAIL, '<email>');
+}
+
 /**
  * Who wrangler is, and which accounts it can write to.
  *
  * `--json` exits non-zero when unauthenticated, which is the distinction that
  * matters: "not logged in" is a precondition the operator fixes in a minute,
  * where a failed API call is a different conversation.
+ *
+ * The account names come back masked (`accountLabel`): nothing downstream
+ * compares them, and everything downstream prints them.
  *
  * @returns {{ email: string|null, authType: string|null, accounts: Array<{ id: string, name: string }> }}
  */
@@ -100,7 +138,7 @@ export function whoami({ cwd } = {}) {
   return {
     email: document.email ?? null,
     authType: document.authType ?? null,
-    accounts: (document.accounts ?? []).map(({ id, name }) => ({ id, name })),
+    accounts: (document.accounts ?? []).map(({ id, name }) => ({ id, name: accountLabel(name) })),
   };
 }
 
@@ -142,6 +180,10 @@ export function expectedAccount(manifest, environment, values = {}) {
  * The manifest's answer depends on the environment (`environmentAccount()`):
  * production may live on another account than staging (ADR 0015), and the
  * refusal names the field that answered.
+ *
+ * The account it returns is also the one every later `wrangler()` of this
+ * process talks to (see `pinnedAccount`): the check and the calls cannot
+ * disagree.
  *
  * @param {{ manifest: string|null, field?: string, environment?: string|null, flag: string|null, env: string|null }} expected
  * @param {{ accounts: Array<{ id: string, name: string }> }} identity
@@ -186,6 +228,7 @@ export function resolveAccount(expected, identity) {
       `Comptes accessibles : ${list}. Reconnectez-vous sur le bon compte (ADR 0002 : le compte appartient à l'agence) plutôt que de changer le manifeste.`,
     );
   }
+  pinnedAccount = match.id;
   return { id: match.id, name: match.name, sources: named.map(([where]) => where) };
 }
 
@@ -358,6 +401,28 @@ export function deleteWorker(worker, { cwd }) {
 
 export function deleteDatabase(name, { cwd }) {
   return removal(wrangler(['d1', 'delete', name, '--skip-confirmation'], { cwd, allowFailure: true }), name);
+}
+
+/**
+ * KV namespaces on the account, as `{ id, title }`.
+ *
+ * A shop owns exactly one, and never asked for it: the Astro adapter adds a
+ * `SESSION` binding to the built configuration, and wrangler provisions it at
+ * the first deploy as `<worker>-session`. Nothing renders it, so only the
+ * account knows its id — and `wrangler delete` leaves it behind with the
+ * Worker gone.
+ */
+export function listKvNamespaces({ cwd }) {
+  const result = wrangler(['kv', 'namespace', 'list'], { cwd });
+  const document = extractJson(result.stdout, 'kv namespace list');
+  return Array.isArray(document) ? document : (document.result ?? []);
+}
+
+export function deleteKvNamespace(namespace, { cwd }) {
+  return removal(
+    wrangler(['kv', 'namespace', 'delete', '--namespace-id', namespace.id, '--skip-confirmation'], { cwd, allowFailure: true }),
+    namespace.title,
+  );
 }
 
 /** The lifecycle rule that bounds a backups bucket. Named, so a second

@@ -21,8 +21,11 @@
  *
  *   accounts        [{ id, name }]           what `whoami` reports
  *   authenticated   boolean                  false makes `whoami --json` exit 1
+ *                                            (plain `whoami` still exits 0)
  *   d1              [{ name, uuid, jurisdiction }]
  *   r2              [{ name, jurisdiction, devUrl, domains }]
+ *   kv              [{ id, title }]          one per deployed Worker, as the
+ *                                            adapter's SESSION binding makes it
  *   workers         [{ name, secrets: [] }]
  *   reportsD1Jurisdiction  boolean           `d1 info` publishes the field or not
  *   failAt          "d1 create" | …          one command that dies, for the
@@ -118,7 +121,11 @@ const uuid = (name) => {
 const jurisdictionOf = () => flag('-J', '--jurisdiction');
 
 if (positionals[0] === 'whoami') {
-  if (state.authenticated === false) fail('You are not authenticated.');
+  // Wrangler 4.149, verbatim: without --json, a missing session is a message
+  // on stdout and exit 0; only --json turns it into a failure. Anything that
+  // reads the exit status of the plain form believes nobody is logged out.
+  if (state.authenticated === false && argv.includes('--json')) done(JSON.stringify({ loggedIn: false }), 1);
+  if (state.authenticated === false) done('You are not authenticated. Please run `wrangler login`.');
   done(JSON.stringify({
     loggedIn: true,
     authType: 'OAuth Token',
@@ -126,6 +133,31 @@ if (positionals[0] === 'whoami') {
     accounts: state.accounts ?? [],
     tokenPermissions: null,
   }));
+}
+
+// Which account a command reaches, decided the way wrangler decides it:
+// CLOUDFLARE_ACCOUNT_ID, else the session's only account, else the one cached
+// the last time somebody picked one interactively in this tree. With none of
+// those wrangler would ask — and a child whose stdin is not a terminal cannot
+// be asked, so it refuses. That refusal is what a session invited onto a
+// client's account (ADR 0015) meets on every call shopctl does not pin, and
+// `account` on each recorded call is how the suite proves where a write went.
+const reachesAccount =
+  !argv.includes('--local') && !argv.includes('--version') && !(positionals[0] === 'deploy' && argv.includes('--dry-run'));
+if (reachesAccount) {
+  const accounts = state.accounts ?? [];
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID || (accounts.length === 1 ? accounts[0].id : (state.cachedAccount ?? null));
+  if (!account && accounts.length > 1) {
+    fail(
+      [
+        'More than one account available but unable to select one in non-interactive mode.',
+        'Please set the appropriate `account_id` in your Wrangler configuration file or assign it to the `CLOUDFLARE_ACCOUNT_ID` environment variable.',
+        'Available accounts are (`<name>`: `<account_id>`):',
+        ...accounts.map(({ id, name }) => `  \`${name}\`: \`${id}\``),
+      ].join('\n'),
+    );
+  }
+  state.calls[state.calls.length - 1].account = account;
 }
 
 if (command === 'd1 list') {
@@ -175,8 +207,14 @@ function databaseNameFor(binding) {
  * keeps it: nothing to provision, nothing on the account, and nothing shared
  * with the remote database of the same name — which is the property a local
  * restore relies on and the suite checks.
+ *
+ * And it is the DEFAULT where wrangler 4 makes it one: `d1 execute`,
+ * `d1 migrations apply` and `r2 object` touch the local simulator unless told
+ * `--remote`. A double that read silence as "remote" let `destroy` print an
+ * `r2 object delete` that empties nothing on the account.
  */
-const LOCAL = argv.includes('--local');
+const LOCAL_BY_DEFAULT = ['d1 execute', 'd1 migrations', 'r2 object'].some((prefix) => command.startsWith(prefix));
+const LOCAL = argv.includes('--local') || (LOCAL_BY_DEFAULT && !argv.includes('--remote'));
 const localState = (...parts) => join(process.cwd(), '.wrangler', 'state', ...parts);
 
 /** Where one database's bytes live: beside the state, one file per D1 name. */
@@ -190,7 +228,10 @@ function databaseFile(name) {
 }
 
 function openDatabase(binding) {
-  const name = databaseNameFor(binding);
+  // Like wrangler, a database's own name is accepted beside a binding, and on
+  // the account it is looked up there when the configuration does not carry it.
+  const onAccount = !LOCAL && (state.d1 ?? []).some((entry) => entry.name === binding);
+  const name = onAccount ? binding : databaseNameFor(binding);
   if (!LOCAL && !(state.d1 ?? []).some((entry) => entry.name === name)) fail(`Couldn't find DB with name '${name}'`);
   return { name, db: new DatabaseSync(databaseFile(name)) };
 }
@@ -458,6 +499,20 @@ if (positionals[0] === 'delete' && flag('--name')) {
   done(`? Are you sure you want to delete ${name}?\n🤖 Using fallback value in non-interactive context: yes\n✨ Successfully deleted ${name}`);
 }
 
+if (command === 'kv namespace list') {
+  // A JSON array on stdout, with no --json flag: the real command has only
+  // this one shape.
+  done(JSON.stringify((state.kv ?? []).map(({ id, title }) => ({ id, title, supports_url_encoding: true })), null, '  '));
+}
+
+if (command === 'kv namespace delete') {
+  const id = flag('--namespace-id');
+  const index = (state.kv ?? []).findIndex((namespace) => namespace.id === id);
+  if (index === -1) fail(`A request to the Cloudflare API (/accounts/…/storage/kv/namespaces/${id}) failed.\n  namespace not found [code: 10013]`);
+  const [removed] = state.kv.splice(index, 1);
+  done(`Deleting KV namespace id: "${removed.id}".\nDeleted KV namespace id: "${removed.id}".`);
+}
+
 if (command.startsWith('d1 delete')) {
   const name = positionals[2];
   const index = (state.d1 ?? []).findIndex((entry) => entry.name === name);
@@ -512,8 +567,32 @@ if (positionals[0] === 'deploy') {
   }
   worker.versions = [{ id: `v${(worker.versions?.length ?? 0) + 1}`, number: (worker.versions?.length ?? 0) + 1 }, ...(worker.versions ?? [])];
   state.deploys = [...(state.deploys ?? []), name];
-  const url = state.deployUrl ?? `https://${name}.example.workers.dev`;
-  done(`Total Upload: 512.00 KiB / gzip: 128.00 KiB\nUploaded ${name} (2.11 sec)\nDeployed ${name} triggers (0.42 sec)\n  ${url}\nCurrent Version ID: 00000000-0000-0000-0000-000000000002`);
+  // The Astro adapter binds SESSION in the BUILT configuration, with no id,
+  // and wrangler provisions it at the first deploy under `<worker>-<binding>`.
+  // Nothing the shop renders names it, which is how a teardown came to forget
+  // it; the double creates it where the real deploy does.
+  const session = `${name}-session`;
+  if (!(state.kv ?? []).some((namespace) => namespace.title === session)) {
+    state.kv = [...(state.kv ?? []), { id: uuid(session).replaceAll('-', ''), title: session }];
+  }
+  // The targets, listed as wrangler lists them: the workers.dev URL only while
+  // that door is open, and a custom domain BARE, with no scheme. A double that
+  // printed a workers.dev URL with that door shut is how `deploy` came to read
+  // its origin from a line the real output never carries.
+  const domains = [...config.matchAll(/\{"pattern":"([^"]+)","custom_domain":true\}/g)].map((match) => match[1]);
+  const targets = [
+    ...(/"workers_dev"\s*:\s*false/.test(config) ? [] : [state.deployUrl ?? `https://${name}.example.workers.dev`]),
+    ...domains.map((domain) => `${domain} (custom domain)`),
+    'schedule: */5 * * * *',
+  ];
+  // A documentation link first, the way wrangler's warnings carry them: an
+  // https URL in the output that is not where the shop is.
+  done(
+    `▲ [WARNING] See https://developers.cloudflare.com/workers/configuration/routing/\n` +
+      `Total Upload: 512.00 KiB / gzip: 128.00 KiB\nUploaded ${name} (2.11 sec)\nDeployed ${name} triggers (0.42 sec)\n` +
+      targets.map((target) => `  ${target}`).join('\n') +
+      `\nCurrent Version ID: 00000000-0000-0000-0000-000000000002`,
+  );
 }
 
 if (command.startsWith('d1 time-travel')) {
